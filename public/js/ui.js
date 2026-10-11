@@ -3,64 +3,71 @@
 //   STANDBY  - its sensor is fine, conditions just don't call for it
 //   OFFLINE  - the sensor it depends on is disconnected, so the relay is
 //              forced off for safety and the card says so explicitly.
-// Previously there was no OFFLINE state at all, which is why the pump/
-// grow-light/fan cards could keep showing ACTIVE (or at least never say
-// anything was wrong) even while the sensor driving that decision was
-// disconnected.
 export function updateAutomationUI(data) {
-    // --- Pump (depends on the soil sensor) ---
+    // --- Pump (depends on soil sensor) ---
     const pumpCard = document.getElementById("autoWateringCard");
+    const pumpPill = document.getElementById("pumpPill");
     pumpCard.classList.remove("active-pump", "offline");
+    
     if (!data.soilConnected) {
         pumpCard.classList.add("offline");
-        document.getElementById("pumpTitle").textContent = "Auto-Watering: OFFLINE";
-        document.getElementById("pumpDesc").textContent = "Soil sensor disconnected — pump disabled for safety.";
+        document.getElementById("pumpTitle").textContent = "Auto-Watering";
+        document.getElementById("pumpDesc").textContent = "Soil sensor disconnected — disabled.";
+        if (pumpPill) pumpPill.textContent = "Offline";
     } else if (data.pump) {
         pumpCard.classList.add("active-pump");
-        document.getElementById("pumpTitle").textContent = "Auto-Watering: ACTIVE";
-        document.getElementById("pumpDesc").textContent = "Soil is dry (<=40%). Pumping water.";
+        document.getElementById("pumpTitle").textContent = "Auto-Watering";
+        document.getElementById("pumpDesc").textContent = "Soil moisture <= 40% (Dry). Pumping water.";
+        if (pumpPill) pumpPill.textContent = "Active";
     } else {
-        document.getElementById("pumpTitle").textContent = "Auto-Watering: Standby";
-        document.getElementById("pumpDesc").textContent = "Soil moisture is optimal.";
+        document.getElementById("pumpTitle").textContent = "Auto-Watering";
+        document.getElementById("pumpDesc").textContent = "Soil moisture >= 55% (Hydrated).";
+        if (pumpPill) pumpPill.textContent = "Standby";
     }
 
-    // --- Grow light (depends on the light sensor) ---
+    // --- Grow light (depends on light sensor) ---
     const lightCard = document.getElementById("autoLightCard");
+    const lightPill = document.getElementById("lightPill");
     lightCard.classList.remove("active-light", "offline");
+    
     if (!data.lightConnected) {
         lightCard.classList.add("offline");
-        document.getElementById("lightTitle").textContent = "Grow Light: OFFLINE";
-        document.getElementById("lightDesc").textContent = "Light sensor disconnected — grow light disabled for safety.";
+        document.getElementById("lightTitle").textContent = "Grow Light";
+        document.getElementById("lightDesc").textContent = "Light sensor disconnected — disabled.";
+        if (lightPill) lightPill.textContent = "Offline";
     } else if (data.lightState) {
         lightCard.classList.add("active-light");
-        document.getElementById("lightTitle").textContent = "Grow Light: ACTIVE";
-        document.getElementById("lightDesc").textContent = "Low light detected. Supplementing.";
+        document.getElementById("lightTitle").textContent = "Grow Light";
+        document.getElementById("lightDesc").textContent = "Low light detected (<= 30%). Supplementing.";
+        if (lightPill) lightPill.textContent = "Active";
     } else {
-        document.getElementById("lightTitle").textContent = "Grow Light: Standby";
-        document.getElementById("lightDesc").textContent = "Natural light is sufficient.";
+        document.getElementById("lightTitle").textContent = "Grow Light";
+        document.getElementById("lightDesc").textContent = "Ambient light is sufficient.";
+        if (lightPill) lightPill.textContent = "Standby";
     }
 
-    // --- Exhaust fan (depends on the DHT temperature sensor) ---
+    // --- Exhaust fan (depends on DHT temperature sensor) ---
     const fanCard = document.getElementById("autoFanCard");
+    const fanPill = document.getElementById("fanPill");
     fanCard.classList.remove("active-fan", "offline");
+    
     if (!data.dhtConnected) {
         fanCard.classList.add("offline");
-        document.getElementById("fanTitle").textContent = "Exhaust Fan: OFFLINE";
-        document.getElementById("fanDesc").textContent = "Temperature sensor disconnected — fan disabled for safety.";
+        document.getElementById("fanTitle").textContent = "Exhaust Fan";
+        document.getElementById("fanDesc").textContent = "Temperature sensor disconnected — disabled.";
+        if (fanPill) fanPill.textContent = "Offline";
     } else if (data.fan) {
         fanCard.classList.add("active-fan");
-        document.getElementById("fanTitle").textContent = "Exhaust Fan: ACTIVE";
-        document.getElementById("fanDesc").textContent = "High temp (>=30°C). Cooling down.";
+        document.getElementById("fanTitle").textContent = "Exhaust Fan";
+        document.getElementById("fanDesc").textContent = "High temp >= 30°C. Cooling down.";
+        if (fanPill) fanPill.textContent = "Active";
     } else {
-        document.getElementById("fanTitle").textContent = "Exhaust Fan: Standby";
-        document.getElementById("fanDesc").textContent = "Temperature is optimal.";
+        document.getElementById("fanTitle").textContent = "Exhaust Fan";
+        document.getElementById("fanDesc").textContent = "Temperature is optimal (< 28.5°C).";
+        if (fanPill) fanPill.textContent = "Standby";
     }
 }
 
-// Toggles a visible "offline" treatment on a sensor card (dashed border,
-// dimmed icon/value — see .sensor.offline in public/css/sensors.css) in
-// addition to the small status chip text. The chip alone was easy to miss;
-// this makes a disconnected sensor unmistakable at a glance.
 function setSensorOffline(cardSelector, isOffline) {
     const card = document.querySelector(cardSelector);
     if (card) card.classList.toggle("offline", isOffline);
@@ -68,78 +75,72 @@ function setSensorOffline(cardSelector, isOffline) {
 
 export function updateSensorUI(data) {
     const tempEl = document.getElementById("temperature");
-    const tempStatus = document.getElementById("temperatureStatus");
-    const humEl = document.getElementById("humidity");
-    const humStatus = document.getElementById("humidityStatus");
+    const humEl  = document.getElementById("humidity");
+    const soilEl = document.getElementById("soil");
+    const lightEl = document.getElementById("light");
+
+    const tempStatus  = tempEl  && tempEl.closest(".reading").querySelector(".reading-state");
+    const humStatus   = humEl   && humEl.closest(".reading").querySelector(".reading-state");
+    const soilStatus  = soilEl  && soilEl.closest(".reading").querySelector(".reading-state");
+    const lightStatus = lightEl && lightEl.closest(".reading").querySelector(".reading-state");
 
     setSensorOffline(".sensor.temperature", !data.dhtConnected);
-    setSensorOffline(".sensor.humidity", !data.dhtConnected);
+    setSensorOffline(".sensor.humidity",    !data.dhtConnected);
 
     if (tempEl && humEl) {
         if (!data.dhtConnected) {
             tempEl.textContent = "--";
-            tempStatus.textContent = "OFFLINE";
-            tempStatus.style.color = "var(--danger)";
+            if (tempStatus) { tempStatus.textContent = "OFFLINE"; tempStatus.style.color = "var(--danger)"; }
             humEl.textContent = "--";
-            humStatus.textContent = "OFFLINE";
-            humStatus.style.color = "var(--danger)";
+            if (humStatus) { humStatus.textContent = "OFFLINE"; humStatus.style.color = "var(--danger)"; }
         } else {
             tempEl.textContent = Number(data.temp).toFixed(1);
-            tempStatus.textContent = data.temp >= 30 ? "WARNING" : "NORMAL";
-            tempStatus.style.color = data.temp >= 30 ? "var(--danger)" : "var(--primary)";
+            if (tempStatus) {
+                tempStatus.textContent = data.temp >= 30 ? "WARNING" : "NORMAL";
+                tempStatus.style.color = data.temp >= 30 ? "var(--danger)" : "var(--primary)";
+            }
             humEl.textContent = Math.round(data.hum);
-            humStatus.textContent = data.hum >= 60 && data.hum <= 80 ? "NORMAL" : "WARNING";
-            humStatus.style.color = data.hum >= 60 && data.hum <= 80 ? "var(--primary)" : "var(--warning)";
+            if (humStatus) {
+                humStatus.textContent = data.hum >= 60 && data.hum <= 80 ? "NORMAL" : "WARNING";
+                humStatus.style.color = data.hum >= 60 && data.hum <= 80 ? "var(--primary)" : "var(--warning)";
+            }
         }
     }
 
-    const soilEl = document.getElementById("soil");
-    const soilStatus = document.getElementById("soilStatus");
     setSensorOffline(".sensor.soil", !data.soilConnected);
     if (soilEl) {
         if (!data.soilConnected) {
             soilEl.textContent = "--";
-            soilStatus.textContent = "OFFLINE";
-            soilStatus.style.color = "var(--danger)";
+            if (soilStatus) { soilStatus.textContent = "OFFLINE"; soilStatus.style.color = "var(--danger)"; }
         } else {
             soilEl.textContent = Math.round(data.soil);
-            soilStatus.textContent = data.soil <= 40 ? "LOW" : "GOOD";
-            soilStatus.style.color = data.soil <= 40 ? "var(--danger)" : "var(--primary)";
+            if (soilStatus) {
+                soilStatus.textContent = data.soil <= 40 ? "LOW" : "GOOD";
+                soilStatus.style.color = data.soil <= 40 ? "var(--danger)" : "var(--primary)";
+            }
         }
     }
 
-    const lightEl = document.getElementById("light");
-    const lightStatus = document.getElementById("lightStatus");
     setSensorOffline(".sensor.light", !data.lightConnected);
     if (lightEl) {
         if (!data.lightConnected) {
             lightEl.textContent = "--";
-            lightStatus.textContent = "OFFLINE";
-            lightStatus.style.color = "var(--danger)";
+            if (lightStatus) { lightStatus.textContent = "OFFLINE"; lightStatus.style.color = "var(--danger)"; }
         } else {
             lightEl.textContent = Math.round(data.light);
-            lightStatus.textContent = data.light >= 300 ? "OPTIMAL" : "LOW";
-            // Was previously inverted: OPTIMAL rendered in the warning
-            // (orange) color and LOW in danger (red) — the opposite of
-            // every other sensor card's good/bad color convention.
-            lightStatus.style.color = data.light >= 300 ? "var(--primary)" : "var(--danger)";
+            if (lightStatus) {
+                lightStatus.textContent = data.light >= 300 ? "OPTIMAL" : "LOW";
+                lightStatus.style.color  = data.light >= 300 ? "var(--primary)" : "var(--danger)";
+            }
         }
     }
 
-    // ==========================================
-    // DYNAMIC PLANT HEALTH SCORING
-    // ==========================================
-    // A disconnected sensor is scored as being AT LEAST as bad as its worst
-    // known reading, not as a free pass (0 deduction). We don't know what's
-    // really happening without the sensor, so the score should reflect
-    // that uncertainty rather than silently looking healthier than it is.
     let score = 100;
     let tempStatusText = "Optimal";
     let humStatusText = "Optimal";
     let soilStatusText = "Moist";
     let lightStatusText = "Optimal";
 
-    // 1. Temperature Check (Target: < 30C)
     if (data.dhtConnected) {
         if (data.temp >= 30) {
             score -= 25;
@@ -153,7 +154,6 @@ export function updateSensorUI(data) {
         tempStatusText = "No Data";
     }
 
-    // 2. Humidity Check (Target: 60% - 80%)
     if (data.dhtConnected) {
         if (data.hum > 85) {
             score -= 15;
@@ -167,7 +167,6 @@ export function updateSensorUI(data) {
         humStatusText = "No Data";
     }
 
-    // 3. Soil Moisture Check (Target: > 40%)
     if (data.soilConnected) {
         if (data.soil <= 40) {
             score -= 35;
@@ -181,7 +180,6 @@ export function updateSensorUI(data) {
         soilStatusText = "No Data";
     }
 
-    // 4. Light Check (Target: >= 300, matches the automation threshold)
     if (data.lightConnected) {
         if (data.light < 300) {
             score -= 25;
@@ -194,17 +192,16 @@ export function updateSensorUI(data) {
 
     score = Math.max(0, score);
 
-    // Update UI Elements
     const healthScoreEl = document.getElementById("healthScore");
     const healthProgressEl = document.getElementById("healthProgress");
 
     if (healthScoreEl) {
         healthScoreEl.textContent = `${score}%`;
-        if (score >= 80) healthScoreEl.style.color = "var(--primary)";
-        else if (score >= 50) healthScoreEl.style.color = "var(--warning)";
-        else healthScoreEl.style.color = "var(--danger)";
+        const ringContainer = document.getElementById("vigorRingContainer");
+        if (ringContainer) {
+            ringContainer.style.setProperty('--pct', score);
+        }
     }
-
     if (healthProgressEl) {
         healthProgressEl.style.width = `${score}%`;
 
@@ -220,7 +217,6 @@ export function updateSensorUI(data) {
         }
     }
 
-    // Helper to update specific plant health metrics
     function setMetricUI(id, text) {
         const el = document.getElementById(id);
         if (!el) return;
@@ -240,4 +236,48 @@ export function updateSensorUI(data) {
     setMetricUI("humidityHealth", humStatusText);
     setMetricUI("soilHealth", soilStatusText);
     setMetricUI("lightHealth", lightStatusText);
+
+    // ==========================================
+    // DYNAMIC SMART INSIGHTS & CLIMATE STATUS
+    // ==========================================
+    const insightTemp = document.getElementById("insightTemp");
+    const insightSoil = document.getElementById("insightSoil");
+    const climateText = document.querySelector(".climate-text");
+
+    if (insightTemp) {
+        if (!data.dhtConnected) {
+            insightTemp.style.display = "none";
+        } else if (data.temp >= 30.0) {
+            insightTemp.style.display = "flex";
+            insightTemp.querySelector("h4").textContent = "High Temperature Alert";
+            insightTemp.querySelector("p").textContent = `Temp is ${data.temp.toFixed(1)}°C (>= 30°C). Exhaust fan active.`;
+        } else {
+            insightTemp.style.display = "none";
+        }
+    }
+
+    if (insightSoil) {
+        if (!data.soilConnected) {
+            insightSoil.style.display = "none";
+        } else if (data.soil <= 40) {
+            insightSoil.style.display = "flex";
+            insightSoil.querySelector("h4").textContent = "Irrigation Recommended";
+            insightSoil.querySelector("p").textContent = `Soil moisture is at ${Math.round(data.soil)}% (<= 40%). Pump standby/active.`;
+        } else {
+            insightSoil.style.display = "none";
+        }
+    }
+
+    if (climateText) {
+        let activeActs = [];
+        if (data.fan) activeActs.push("Fan Cooling");
+        if (data.pump) activeActs.push("Watering");
+        if (data.lightState) activeActs.push("Grow Light");
+
+        if (activeActs.length > 0) {
+            climateText.innerHTML = `<strong>Climate System Active</strong> Regulating: ${activeActs.join(", ")}.`;
+        } else {
+            climateText.innerHTML = `<strong>Climate System Stable</strong> All metrics within optimal thresholds.`;
+        }
+    }
 }

@@ -1,180 +1,137 @@
 /*
-  SmartGrow_ESP32.ino
-  ESP32 Greenhouse Monitor — production firmware for the SmartGrow dashboard.
+  SmartGrow_ESP32.ino  (v5.2)
+  ESP32 greenhouse controller for the SmartGrow dashboard.
 
-  WHAT THIS DOES
-  ---------------
-  - Reads temperature/humidity (DHT22), soil moisture (capacitive analog),
-    and ambient light (LDR) on a fixed interval.
-  - Runs automation LOCALLY, on the ESP32 itself. The pump, grow light, and
-    exhaust fan are controlled by THIS firmware — the website only ever
-    displays what this firmware reports; it does not remotely command the
-    relays.
-  - FAIL-SAFE: the instant a sensor looks disconnected, the relay(s) that
-    depend on it are forced OFF immediately, every loop — not just reported
-    as off. This is the hardware-level fix for "relays stay on when sensors
-    disconnect": DHT failure -> fan off, bad soil reading -> pump off, bad
-    light reading -> grow light off.
-  - Reports every reading to the SmartGrow backend (local desktop mode over
-    HTTP, or a hosted Vercel deployment over HTTPS) on a fixed interval,
-    through a WiFi connection that reconnects itself in the background
-    without ever blocking the sensor/automation loop (fixes "constant
-    disconnection of ESP32" caused by a previous blocking reconnect).
+  HARDWARE
+    DHT11 (temp/humidity), soil moisture sensor, light sensor (LDR, analog),
+    4-channel relay: IN1 = 12V pump, IN2 = warm light, IN3 = 12V fan, IN4 = spare.
+    Pins are all in config.h.
 
-  JSON PAYLOAD SENT TO POST /update (keep this in sync with app.py):
-    {
-      "temperature": 24.5,          // omitted if DHT read failed
-      "humidity": 61.0,             // omitted if DHT read failed
-      "soil_moisture": 42,          // omitted if soil sensor looks disconnected
-      "light": 480,                 // 0-1000, omitted if LDR looks disconnected
-      "dht_connected": true,
-      "soil_connected": true,
-      "light_connected": true,
-      "fan": "OFF",                 // relay state
-      "water_pump": "OFF",          // relay state
-      "grow_light": "ON"            // relay state — NOT the same field as "light" above
-    }
-  "light" (the numeric LDR reading) and "grow_light" (the relay command) are
-  deliberately two different keys. An earlier version of this project used
-  "light" for both, which silently broke the numeric reading — see
-  CHANGELOG.md.
+  WHAT IT DOES
+    - Reads sensors, runs automation LOCALLY (works even with no WiFi).
+    - FAIL-SAFE: if a sensor looks disconnected, the device that depends on
+      it is forced OFF immediately.
+    - Pump safety: max run time + cooldown, so it can never run away.
+    - Reports to the dashboard with POST /update every few seconds.
+    - WiFi self-heals; sensor/automation loop is never blocked by WiFi.
 
-  SETUP CHECKLIST
-  -----------------
-  1. Install libraries (Arduino IDE -> Tools -> Manage Libraries):
-       - "DHT sensor library" by Adafruit (pulls in "Adafruit Unified
-         Sensor" automatically)
-       - "ArduinoJson" by Benoit Blanchon — version 7.x
-  2. Open config.h (the second tab next to this file) and fill in your
-     WiFi credentials, server address, and API key.
-  3. Run SmartGrow_Diagnostics.ino FIRST on the same wiring to confirm every
-     sensor/relay works and to find your calibration numbers — then put
-     those numbers in config.h.
-  4. Flash this sketch. Open Tools -> Serial Monitor at 115200 baud to watch
-     it run.
+  JSON SENT TO POST /update (matches app.py — unchanged from v5.1)
+    temperature, humidity, soil_moisture, light  (omitted when that sensor is down)
+    dht_connected, soil_connected, light_connected
+    fan, water_pump, grow_light   ("ON"/"OFF")  <- grow_light = the warm light relay
+
+  LIBRARIES (Arduino IDE -> Tools -> Manage Libraries)
+    - "DHT sensor library" by Adafruit (accept "Adafruit Unified Sensor" too)
+    ArduinoJson is NOT needed any more.
+  Board package: "esp32" by Espressif (Boards Manager).
 */
 
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
-#include <ArduinoJson.h>
 #include <DHT.h>
 #include "config.h"
 
 DHT dht(DHT_PIN, DHT_TYPE);
 
-// ---- Relay helper: abstracts active-HIGH vs active-LOW relay boards ----
+// ---- Live state ----
+float temperatureC = 0.0f;
+float humidityPct  = 0.0f;
+int   soilPct      = 0;
+int   lightLevel   = 0;
+
+bool dhtConnected   = false;
+bool soilConnected  = false;
+bool lightConnected = false;
+
+bool pumpOn      = false;
+bool growLightOn = false;   // the warm light
+bool fanOn       = false;
+
+// valid = we have received at least one good reading since boot / recovery
+bool soilValid  = false;
+bool lightValid = false;
+
+int dhtFailCount  = 0;
+int soilRailCount = 0;
+int ldrRailCount  = 0;
+
+// Time each relay last changed. Initialised "long ago" so the first
+// switch after boot is allowed immediately (unsigned wrap-around is intended).
+unsigned long fanChangedAt   = (unsigned long)(0UL - (unsigned long)MIN_RELAY_HOLD_MS);
+unsigned long pumpChangedAt  = (unsigned long)(0UL - (unsigned long)MIN_RELAY_HOLD_MS);
+unsigned long lightChangedAt = (unsigned long)(0UL - (unsigned long)MIN_RELAY_HOLD_MS);
+
+bool pumpInCooldown = false;
+unsigned long pumpCooldownStart = 0;
+
+unsigned long lastSensorRead  = 0;
+unsigned long lastServerPost  = 0;
+unsigned long lastWifiAttempt = 0;
+unsigned long wifiDownSince   = 0;   // 0 = WiFi currently up
+int lowHeapCount = 0;
+int postFailCount = 0;
+
+// ---------------------------------------------------------------------------
+// Relay helper: handles active-LOW / active-HIGH boards
+// ---------------------------------------------------------------------------
 void setRelay(uint8_t pin, bool on) {
   bool level = RELAY_ACTIVE_LOW ? !on : on;
   digitalWrite(pin, level ? HIGH : LOW);
 }
 
-// ---- Live state ----
-float temperatureC = 0.0f;
-float humidityPct = 0.0f;
-int soilPct = 0;
-int lightLevel = 0;
+void writeAllRelays() {
+  setRelay(RELAY_PUMP_PIN,  pumpOn);
+  setRelay(RELAY_LIGHT_PIN, growLightOn);
+  setRelay(RELAY_FAN_PIN,   fanOn);
+  setRelay(RELAY_SPARE_PIN, false);   // spare channel always OFF
+}
 
-bool dhtConnected = false;
-bool soilConnected = false;
-bool lightConnected = false;
+// ---------------------------------------------------------------------------
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      // Reason codes: 2=auth expired, 15/204=handshake timeout, 201=AP not found,
+      // 200=beacon timeout (weak signal), 202=auth fail (wrong password)
+      Serial.printf("[WiFi] Disconnected, reason code %d\n", info.wifi_sta_disconnected.reason);
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      Serial.printf("[WiFi] Connected. IP %s  RSSI %d dBm\n",
+                    WiFi.localIP().toString().c_str(), WiFi.RSSI());
+      break;
+    default:
+      break;
+  }
+}
 
-bool pumpOn = false;
-bool growLightOn = false;
-bool fanOn = false;
-
-int soilRailCount = 0;   // consecutive rail-pinned (0 or 4095) readings
-int ldrRailCount = 0;
-
-unsigned long lastSensorRead = 0;
-unsigned long lastServerPost = 0;
-unsigned long lastWifiAttempt = 0;
+void startWiFi() {
+  WiFi.persistent(false);          // don't wear out flash on every begin()
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);            // modem-sleep causes random dropouts/latency
+  WiFi.setAutoReconnect(true);
+  WiFi.onEvent(onWiFiEvent);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.println("[SmartGrow] WiFi connecting in background...");
+}
 
 // ---------------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n[SmartGrow] Booting...");
+  Serial.println("\n[SmartGrow] Booting v5.2...");
 
   pinMode(RELAY_PUMP_PIN, OUTPUT);
   pinMode(RELAY_LIGHT_PIN, OUTPUT);
   pinMode(RELAY_FAN_PIN, OUTPUT);
+  pinMode(RELAY_SPARE_PIN, OUTPUT);
   pinMode(STATUS_LED_PIN, OUTPUT);
+  writeAllRelays();                // everything OFF until a real reading says otherwise
 
-  // Never boot with actuators on based on stale/garbage state — everything
-  // starts OFF until a real sensor reading says otherwise.
-  setRelay(RELAY_PUMP_PIN, false);
-  setRelay(RELAY_LIGHT_PIN, false);
-  setRelay(RELAY_FAN_PIN, false);
-
+  pinMode(SOIL_PIN, INPUT);
+  pinMode(LDR_PIN, INPUT);
   dht.begin();
-  connectWiFi();
 
-  if (WiFi.status() == WL_CONNECTED) {
-    runStartupConnectivityTest();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// One-time startup test: isolates whether a connectivity problem is
-// Vercel-specific or a broader network/router/ISP issue, by testing a
-// known-good external site (Google) over both plain HTTP and HTTPS before
-// testing SERVER_HOST itself. Runs once at boot only, not every loop.
-// ---------------------------------------------------------------------------
-void runStartupConnectivityTest() {
-  Serial.println("\n[SmartGrow][selftest] ===== Startup connectivity test =====");
-
-  // 1. Raw IP reachability (no DNS involved at all) — Google's public DNS server.
-  WiFiClient plainTest;
-  bool ipOk = plainTest.connect(IPAddress(8, 8, 8, 8), 53);
-  Serial.printf("[SmartGrow][selftest] Raw TCP to 8.8.8.8:53 -> %s\n", ipOk ? "SUCCESS" : "FAILED");
-  if (ipOk) plainTest.stop();
-
-  // 2. DNS resolution of a known-good external domain.
-  IPAddress googleIP;
-  bool dnsOk = WiFi.hostByName("www.google.com", googleIP);
-  Serial.printf("[SmartGrow][selftest] DNS for www.google.com -> %s\n",
-                dnsOk ? googleIP.toString().c_str() : "FAILED");
-
-  // 3. Plain HTTP (port 80, no TLS at all) to that known-good domain.
-  WiFiClient httpTest;
-  bool httpOk = httpTest.connect("www.google.com", 80);
-  Serial.printf("[SmartGrow][selftest] Plain HTTP TCP to www.google.com:80 -> %s\n", httpOk ? "SUCCESS" : "FAILED");
-  if (httpOk) httpTest.stop();
-
-  // 4. HTTPS (TLS) to that same known-good domain — isolates "TLS is broken
-  // in general on this device/network" from "TLS specifically to Vercel is broken".
-  WiFiClientSecure googleSecure;
-  googleSecure.setInsecure();
-  bool googleTlsOk = googleSecure.connect("www.google.com", 443);
-  Serial.printf("[SmartGrow][selftest] HTTPS/TLS to www.google.com:443 -> %s\n", googleTlsOk ? "SUCCESS" : "FAILED");
-  if (!googleTlsOk) {
-    char errBuf[160];
-    googleSecure.lastError(errBuf, sizeof(errBuf));
-    Serial.printf("[SmartGrow][selftest] mbedTLS error detail: %s\n", errBuf);
-  } else {
-    googleSecure.stop();
-  }
-
-  // 5. Now the actual target, same method as #4, for direct comparison.
-  IPAddress targetIP;
-  bool targetDnsOk = WiFi.hostByName(SERVER_HOST, targetIP);
-  Serial.printf("[SmartGrow][selftest] DNS for %s -> %s\n",
-                SERVER_HOST, targetDnsOk ? targetIP.toString().c_str() : "FAILED");
-
-  WiFiClientSecure targetSecure;
-  targetSecure.setInsecure();
-  bool targetTlsOk = targetSecure.connect(SERVER_HOST, 443);
-  Serial.printf("[SmartGrow][selftest] HTTPS/TLS to %s:443 -> %s\n", SERVER_HOST, targetTlsOk ? "SUCCESS" : "FAILED");
-  if (!targetTlsOk) {
-    char errBuf[160];
-    targetSecure.lastError(errBuf, sizeof(errBuf));
-    Serial.printf("[SmartGrow][selftest] mbedTLS error detail: %s\n", errBuf);
-  } else {
-    targetSecure.stop();
-  }
-
-  Serial.println("[SmartGrow][selftest] ===== End startup test =====\n");
+  startWiFi();                     // non-blocking: automation starts immediately
 }
 
 // ---------------------------------------------------------------------------
@@ -186,273 +143,264 @@ void loop() {
   if (now - lastSensorRead >= SENSOR_READ_INTERVAL_MS) {
     lastSensorRead = now;
     readSensors();
-    runAutomation();
+    runAutomation(millis());
     printStatus();
   }
 
   if (now - lastServerPost >= SERVER_POST_INTERVAL_MS) {
-    lastServerPost = now;
     if (WiFi.status() == WL_CONNECTED) {
       postReading();
     } else {
-      Serial.println("[SmartGrow] Skipping post — WiFi not connected.");
+      Serial.println("[SmartGrow] Skipping post, WiFi not connected.");
     }
+    lastServerPost = millis();     // measured AFTER the post so a slow post never causes back-to-back posts
   }
 
-  // Status LED: solid while WiFi is connected, slow blink while it isn't.
-  digitalWrite(STATUS_LED_PIN, WiFi.status() == WL_CONNECTED ? HIGH : ((now / 300) % 2));
+  // Status LED: solid = WiFi up, blinking = WiFi down.
+  digitalWrite(STATUS_LED_PIN, WiFi.status() == WL_CONNECTED ? HIGH : (((millis() / 300) % 2) ? HIGH : LOW));
+
+  delay(20);                       // let WiFi/idle tasks run
 }
 
 // ---------------------------------------------------------------------------
-// WiFi — non-blocking connect + reconnect. A flaky network never freezes
-// the sensor/automation loop, and we never get stuck retrying forever
-// inside setup(). This is the fix for "constant disconnection of ESP32"
-// when the original blocking reconnect logic stalled the whole device.
+// WiFi supervision (never blocks)
 // ---------------------------------------------------------------------------
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("[SmartGrow] Connecting to WiFi");
-
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
-    delay(250);
-    Serial.print(".");
-  }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("[SmartGrow] WiFi connected. IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("[SmartGrow] Not connected yet — will keep retrying in the background.");
-  }
-}
-
 void maintainWiFi(unsigned long now) {
-  if (WiFi.status() == WL_CONNECTED) return;
-  if (now - lastWifiAttempt < WIFI_RECONNECT_INTERVAL_MS) return;
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiDownSince = 0;
+    return;
+  }
 
-  lastWifiAttempt = now;
-  Serial.println("[SmartGrow] WiFi down — reconnecting...");
-  WiFi.disconnect();
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  if (wifiDownSince == 0) wifiDownSince = (now == 0) ? 1 : now;
+
+#if WIFI_REBOOT_AFTER_MS > 0
+  if (now - wifiDownSince >= (unsigned long)WIFI_REBOOT_AFTER_MS) {
+    Serial.println("[SmartGrow] WiFi down too long, rebooting to recover the radio.");
+    delay(100);
+    ESP.restart();
+  }
+#endif
+
+  if (now - lastWifiAttempt >= (unsigned long)WIFI_RECONNECT_INTERVAL_MS) {
+    lastWifiAttempt = now;
+    Serial.println("[SmartGrow] WiFi down, reconnecting...");
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Sensors
 // ---------------------------------------------------------------------------
+int readAnalogAveraged(uint8_t pin) {
+  long sum = 0;
+  for (int i = 0; i < ADC_SAMPLES; i++) {
+    sum += analogRead(pin);
+    delayMicroseconds(200);
+  }
+  return (int)(sum / ADC_SAMPLES);
+}
+
 void readSensors() {
-  // --- DHT22 ---
+  // --- DHT11 --- a single failed read is normal; only call it
+  // disconnected after several in a row. Out-of-range values are rejected
+  // because the server answers HTTP 400 to them (which would make the whole
+  // dashboard look offline).
   float h = dht.readHumidity();
   float t = dht.readTemperature();
-  if (isnan(h) || isnan(t)) {
-    dhtConnected = false;
-    // Deliberately NOT zeroing temperatureC/humidityPct here — the
-    // dashboard already ignores them once dhtConnected is false, this just
-    // avoids a cosmetic flash to 0.0 on a single missed read.
-  } else {
-    dhtConnected = true;
+  bool dhtOk = !(isnan(h) || isnan(t)) && t >= -40.0f && t <= 80.0f && h >= 0.0f && h <= 100.0f;
+  if (dhtOk) {
+    dhtFailCount = 0;
     temperatureC = t;
-    humidityPct = h;
+    humidityPct  = h;
+    dhtConnected = true;
+  } else {
+    if (dhtFailCount < 1000) dhtFailCount++;
+    if (dhtFailCount >= DHT_FAIL_THRESHOLD) dhtConnected = false;
   }
 
-  // --- Soil moisture (capacitive, analog) ---
-  // A raw reading pinned at a rail for several reads in a row is the
-  // real-world signature of an unplugged/shorted sensor, as opposed to one
-  // noisy sample.
-  int soilRaw = analogRead(SOIL_PIN);
-  if (soilRaw <= 5 || soilRaw >= 4090) {
-    soilRailCount++;
+  // --- Soil moisture --- a reading pinned at either end of the ADC
+  // range for several reads in a row means unplugged/shorted.
+  int soilRaw = readAnalogAveraged(SOIL_PIN);
+  bool soilRail = (soilRaw <= 5 || soilRaw >= 4090);
+  if (soilRail) {
+    if (soilRailCount < 1000) soilRailCount++;
   } else {
     soilRailCount = 0;
-  }
-  soilConnected = soilRailCount < RAIL_COUNT_THRESHOLD;
-  if (soilConnected) {
     long pct = map(soilRaw, SOIL_RAW_DRY, SOIL_RAW_WET, 0, 100);
-    soilPct = constrain(pct, 0, 100);
+    soilPct = (int)constrain(pct, 0L, 100L);
+    soilValid = true;
   }
+  soilConnected = soilValid && (soilRailCount < RAIL_COUNT_THRESHOLD);
 
-  // --- Light (LDR, analog) ---
-  int ldrRaw = analogRead(LDR_PIN);
-  if (ldrRaw <= 5 || ldrRaw >= 4090) {
-    ldrRailCount++;
+  // --- Light sensor --- the dark end of the scale is a LEGITIMATE reading
+  // (a dark greenhouse must turn the warm light ON), so only the opposite
+  // end of the scale counts as a fault.
+  int ldrRaw = readAnalogAveraged(LDR_PIN);
+  bool darkIsHigh = (LDR_RAW_DARK > LDR_RAW_BRIGHT);
+  bool ldrFault = darkIsHigh ? (ldrRaw <= 5) : (ldrRaw >= 4090);
+  if (ldrFault) {
+    if (ldrRailCount < 1000) ldrRailCount++;
   } else {
     ldrRailCount = 0;
-  }
-  lightConnected = ldrRailCount < RAIL_COUNT_THRESHOLD;
-  if (lightConnected) {
     long level = map(ldrRaw, LDR_RAW_DARK, LDR_RAW_BRIGHT, 0, 1000);
-    lightLevel = constrain(level, 0, 1000);
+    lightLevel = (int)constrain(level, 0L, 1000L);
+    lightValid = true;
   }
+  lightConnected = lightValid && (ldrRailCount < RAIL_COUNT_THRESHOLD);
 }
 
 // ---------------------------------------------------------------------------
-// Automation — runs locally, independent of WiFi/the dashboard being
-// reachable at all. Every branch enforces: sensor not connected -> actuator
-// forced OFF, checked fresh every single loop (not just on the transition),
-// so a relay can never be left stuck on from a reading taken before the
-// sensor failed. Hysteresis (separate ON/OFF thresholds) stops relays from
-// chattering rapidly when a reading sits right at the edge of a threshold.
+// Automation
 // ---------------------------------------------------------------------------
-void runAutomation() {
-  // Exhaust fan <- temperature
+void changeState(bool &state, bool next, unsigned long &changedAt, unsigned long now) {
+  if (state != next) {
+    state = next;
+    changedAt = now;
+  }
+}
+
+void runAutomation(unsigned long now) {
+  // ---- Fan <- temperature ----
   if (!dhtConnected) {
-    fanOn = false;
-  } else if (temperatureC >= TEMP_FAN_ON_C) {
-    fanOn = true;
-  } else if (temperatureC <= TEMP_FAN_OFF_C) {
-    fanOn = false;
-  } // else: inside the hysteresis band — leave fanOn as it was
-
-  // Water pump <- soil moisture
-  if (!soilConnected) {
-    pumpOn = false;
-  } else if (soilPct <= SOIL_PUMP_ON_PCT) {
-    pumpOn = true;
-  } else if (soilPct >= SOIL_PUMP_OFF_PCT) {
-    pumpOn = false;
+    changeState(fanOn, false, fanChangedAt, now);            // fail-safe, immediate
+  } else {
+    bool want = fanOn;
+    if (temperatureC >= TEMP_FAN_ON_C)       want = true;
+    else if (temperatureC <= TEMP_FAN_OFF_C) want = false;
+    if (want != fanOn && (now - fanChangedAt) >= (unsigned long)MIN_RELAY_HOLD_MS) {
+      changeState(fanOn, want, fanChangedAt, now);
+    }
   }
 
-  // Grow light <- ambient light
+  // ---- Warm light <- ambient light ----
   if (!lightConnected) {
-    growLightOn = false;
-  } else if (lightLevel < LIGHT_GROWLIGHT_ON) {
-    growLightOn = true;
-  } else if (lightLevel >= LIGHT_GROWLIGHT_OFF) {
-    growLightOn = false;
+    changeState(growLightOn, false, lightChangedAt, now);    // fail-safe, immediate
+  } else {
+    bool want = growLightOn;
+    if (lightLevel < LIGHT_GROWLIGHT_ON)        want = true;
+    else if (lightLevel >= LIGHT_GROWLIGHT_OFF) want = false;
+    if (want != growLightOn && (now - lightChangedAt) >= (unsigned long)MIN_RELAY_HOLD_MS) {
+      changeState(growLightOn, want, lightChangedAt, now);
+    }
   }
 
-  setRelay(RELAY_FAN_PIN, fanOn);
-  setRelay(RELAY_PUMP_PIN, pumpOn);
-  setRelay(RELAY_LIGHT_PIN, growLightOn);
+  // ---- Pump <- soil moisture, with max-run + cooldown ----
+  if (!soilConnected) {
+    changeState(pumpOn, false, pumpChangedAt, now);          // fail-safe, immediate
+    pumpInCooldown = false;
+  } else if (pumpOn) {
+    if (soilPct >= SOIL_PUMP_OFF_PCT) {
+      changeState(pumpOn, false, pumpChangedAt, now);        // target reached, stop at once
+    } else if ((now - pumpChangedAt) >= (unsigned long)PUMP_MAX_RUN_MS) {
+      changeState(pumpOn, false, pumpChangedAt, now);        // ran long enough, let water soak in
+      pumpInCooldown = true;
+      pumpCooldownStart = now;
+      Serial.println("[SmartGrow] Pump max run reached, resting.");
+    }
+  } else {
+    if (pumpInCooldown && (now - pumpCooldownStart) >= (unsigned long)PUMP_COOLDOWN_MS) {
+      pumpInCooldown = false;
+    }
+    if (!pumpInCooldown && soilPct <= SOIL_PUMP_ON_PCT &&
+        (now - pumpChangedAt) >= (unsigned long)MIN_RELAY_HOLD_MS) {
+      changeState(pumpOn, true, pumpChangedAt, now);
+    }
+  }
+
+  writeAllRelays();
 }
 
 // ---------------------------------------------------------------------------
 // Reporting to the dashboard
 // ---------------------------------------------------------------------------
-void postReading() {
-  JsonDocument doc;   // ArduinoJson v7. On v6, use StaticJsonDocument<384> doc; instead.
-
-  if (dhtConnected) {
-    doc["temperature"] = temperatureC;
-    doc["humidity"] = humidityPct;
+bool postReading() {
+  if (SERVER_USE_HTTPS && ESP.getMaxAllocHeap() < (size_t)MIN_HEAP_FOR_TLS) {
+    Serial.printf("[SmartGrow] Low memory (%u), skipping post.\n", (unsigned)ESP.getMaxAllocHeap());
+    if (++lowHeapCount >= 10) {
+      Serial.println("[SmartGrow] Memory stayed low, rebooting.");
+      delay(100);
+      ESP.restart();
+    }
+    return false;
   }
-  if (soilConnected) {
-    doc["soil_moisture"] = soilPct;
-  }
-  if (lightConnected) {
-    doc["light"] = lightLevel;
-  }
-  doc["dht_connected"] = dhtConnected;
-  doc["soil_connected"] = soilConnected;
-  doc["light_connected"] = lightConnected;
-  doc["fan"] = fanOn ? "ON" : "OFF";
-  doc["water_pump"] = pumpOn ? "ON" : "OFF";
-  doc["grow_light"] = growLightOn ? "ON" : "OFF";
+  lowHeapCount = 0;
 
   String payload;
-  serializeJson(doc, payload);
+  payload.reserve(300);
+  payload = "{";
+  if (dhtConnected) {
+    payload += "\"temperature\":" + String(temperatureC, 1) + ",";
+    payload += "\"humidity\":" + String(humidityPct, 1) + ",";
+  }
+  if (soilConnected)  payload += "\"soil_moisture\":" + String(soilPct) + ",";
+  if (lightConnected) payload += "\"light\":" + String(lightLevel) + ",";
+  payload += String("\"dht_connected\":") + (dhtConnected ? "true" : "false") + ",";
+  payload += String("\"soil_connected\":") + (soilConnected ? "true" : "false") + ",";
+  payload += String("\"light_connected\":") + (lightConnected ? "true" : "false") + ",";
+  payload += String("\"fan\":\"") + (fanOn ? "ON" : "OFF") + "\",";
+  payload += String("\"water_pump\":\"") + (pumpOn ? "ON" : "OFF") + "\",";
+  payload += String("\"grow_light\":\"") + (growLightOn ? "ON" : "OFF") + "\"}";
 
   HTTPClient http;
-  String url;
+  WiFiClientSecure secureClient;   // fresh client every post (reusing one goes stale on ESP32)
+  WiFiClient plainClient;
   bool began;
 
-  // IMPORTANT: a fresh WiFiClientSecure is created on every single call,
-  // not reused across calls (it used to be `static`). A single
-  // WiFiClientSecure reused for repeated HTTPS requests on ESP32 commonly
-  // works for the first request or two and then starts failing with
-  // "connection refused" as its internal TLS session state gets stale —
-  // this was the actual cause of the POST failures. A plain local variable
-  // here means a clean TLS connection every time, at the cost of a few
-  // hundred ms more per post for the handshake, which is a fine trade-off
-  // at a 2-second post interval.
-  WiFiClientSecure secureClient;
-
   if (SERVER_USE_HTTPS) {
-    // Skips certificate validation — the simplest working option for a
-    // hobbyist device without managing a CA bundle. If you need real
-    // certificate validation, replace this with secureClient.setCACert(...)
-    // and your host's root CA. MUST be set before any connect() attempt,
-    // including the diagnostic one just below — otherwise the diagnostic
-    // connect would try (and fail) full certificate-chain validation,
-    // reporting a misleading failure unrelated to the real POST attempt.
-    secureClient.setInsecure();
-
-    // --- Diagnostics: isolate DNS vs. TCP vs. TLS before trying HTTPClient ---
-    // "connection refused" from HTTPClient is a catch-all error code that
-    // can mean a DNS failure, a blocked/unreachable TCP connection, or a
-    // failed TLS handshake. These lines print exactly which layer fails.
-    IPAddress resolvedIP;
-    if (WiFi.hostByName(SERVER_HOST, resolvedIP)) {
-      Serial.printf("[SmartGrow][diag] DNS OK: %s -> %s\n", SERVER_HOST, resolvedIP.toString().c_str());
-    } else {
-      Serial.printf("[SmartGrow][diag] DNS FAILED for %s (network/router may be blocking or slow DNS)\n", SERVER_HOST);
-    }
-
-    bool rawConnected = secureClient.connect(SERVER_HOST, 443);
-    Serial.printf("[SmartGrow][diag] Raw TLS connect() to %s:443 -> %s\n", SERVER_HOST, rawConnected ? "SUCCESS" : "FAILED");
-    if (!rawConnected) {
-      char errBuf[160];
-      secureClient.lastError(errBuf, sizeof(errBuf));
-      Serial.printf("[SmartGrow][diag] mbedTLS error detail: %s\n", errBuf);
-    } else {
-      secureClient.stop(); // diagnostic connection only; HTTPClient opens its own fresh one below
-    }
-    // --- End diagnostics ---
-
-    url = String("https://") + SERVER_HOST + UPDATE_PATH;
-    began = http.begin(secureClient, url);
+    secureClient.setInsecure();    // no certificate validation: simplest for a hobby device
+    began = http.begin(secureClient, String("https://") + SERVER_HOST + UPDATE_PATH);
   } else {
-    url = String("http://") + SERVER_HOST + ":" + String(SERVER_PORT) + UPDATE_PATH;
-    began = http.begin(url);
+    began = http.begin(plainClient, String("http://") + SERVER_HOST + ":" + String(SERVER_PORT) + UPDATE_PATH);
   }
 
   if (!began) {
-    Serial.println("[SmartGrow] HTTPClient.begin() failed — check SERVER_HOST/PORT in config.h.");
-    return;
+    Serial.println("[SmartGrow] http.begin() failed, check SERVER_HOST/PORT in config.h.");
+    return false;
   }
 
+  http.setReuse(false);
+  http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+  http.setTimeout(HTTP_RESPONSE_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
   if (strlen(API_KEY) > 0) {
     http.addHeader("X-API-Key", API_KEY);
   }
-  http.setTimeout(5000);
-  http.setConnectTimeout(5000);
-
-  Serial.printf("[SmartGrow] Free heap before POST: %u bytes\n", ESP.getFreeHeap());
 
   int status = http.POST(payload);
-  if (status > 0) {
-    if (status == 200) {
-      Serial.println("[SmartGrow] POST -> HTTP 200 OK");
-    } else {
-      Serial.printf("[SmartGrow] POST -> HTTP %d: %s\n", status, http.getString().c_str());
-      if (status == 401) {
-        Serial.println("[SmartGrow] 401 Unauthorized — API_KEY in config.h doesn't match SMARTGROW_API_KEY on the server.");
-      }
-    }
+  bool ok = (status == 200);
+
+  if (ok) {
+    postFailCount = 0;
+    Serial.println("[SmartGrow] POST OK (200)");
+  } else if (status > 0) {
+    postFailCount++;
+    Serial.printf("[SmartGrow] POST -> HTTP %d: %s\n", status, http.getString().c_str());
+    if (status == 401) Serial.println("[SmartGrow] 401: API_KEY in config.h does not match SMARTGROW_API_KEY on the server.");
   } else {
-    Serial.printf("[SmartGrow] POST failed: %s (check SERVER_HOST/PORT/HTTPS setting)\n", http.errorToString(status).c_str());
+    postFailCount++;
+    Serial.printf("[SmartGrow] POST failed: %s  (RSSI %d dBm, free heap %u)\n",
+                  http.errorToString(status).c_str(), WiFi.RSSI(), (unsigned)ESP.getFreeHeap());
   }
 
   http.end();
-  secureClient.stop(); // release the TLS socket promptly instead of waiting on it to be garbage-collected
+  secureClient.stop();
+  plainClient.stop();
+  return ok;
 }
 
 // ---------------------------------------------------------------------------
 void printStatus() {
   Serial.println("-------------------------------------------");
-  Serial.printf("Temp: %s  Hum: %s\n",
-                dhtConnected ? (String(temperatureC, 1) + "C").c_str() : "OFFLINE",
-                dhtConnected ? (String(humidityPct, 0) + "%").c_str() : "OFFLINE");
-  Serial.printf("Soil: %s  Light: %s\n",
-                soilConnected ? (String(soilPct) + "%").c_str() : "OFFLINE",
-                lightConnected ? String(lightLevel).c_str() : "OFFLINE");
-  Serial.printf("Pump: %s  GrowLight: %s  Fan: %s\n",
-                pumpOn ? "ON" : "off", growLightOn ? "ON" : "off", fanOn ? "ON" : "off");
-  Serial.printf("WiFi: %s\n",
-                WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "disconnected");
+  if (dhtConnected) Serial.printf("Temp: %.1fC  Hum: %.0f%%\n", temperatureC, humidityPct);
+  else              Serial.println("Temp: OFFLINE  Hum: OFFLINE");
+
+  if (soilConnected)  Serial.printf("Soil: %d%%", soilPct);  else Serial.print("Soil: OFFLINE");
+  if (lightConnected) Serial.printf("  Light: %d\n", lightLevel); else Serial.println("  Light: OFFLINE");
+
+  Serial.printf("Pump: %s  WarmLight: %s  Fan: %s%s\n",
+                pumpOn ? "ON" : "off", growLightOn ? "ON" : "off", fanOn ? "ON" : "off",
+                pumpInCooldown ? "  (pump resting)" : "");
+  if (WiFi.status() == WL_CONNECTED) Serial.printf("WiFi: %s  RSSI %d dBm\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
+  else                               Serial.println("WiFi: disconnected");
 }

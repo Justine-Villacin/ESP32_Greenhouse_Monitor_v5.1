@@ -299,6 +299,7 @@ def update_from_esp32():
     return jsonify({"status": "success"})
 
 
+
 # ---------------------------------------------------------------------------
 # Data export (CSV / Excel)
 # ---------------------------------------------------------------------------
@@ -427,3 +428,49 @@ def download_excel_file():
         download_name="SmartGrow_Data.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+    
+@app.route('/api/history')
+def api_history():
+    rows, source = _resolve_history_rows()
+    if not rows:
+        return jsonify({"status": "success", "history": []})
+    
+    from collections import defaultdict
+    from datetime import datetime
+    
+    daily_data = defaultdict(lambda: {"temps": [], "hums": [], "soils": []})
+    
+    for r in rows:
+        if not r or len(r) < 4:
+            continue
+        ts_str = str(r[0])
+        t_val, h_val, s_val = r[1], r[2], r[3]
+        
+        if t_val == "ERR" or h_val == "ERR" or s_val == "ERR":
+            continue
+            
+        try:
+            dt = datetime.strptime(ts_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
+            date_str = dt.strftime("%b %d")
+            daily_data[date_str]["temps"].append(float(t_val))
+            daily_data[date_str]["hums"].append(float(h_val))
+            daily_data[date_str]["soils"].append(float(s_val))
+        except (ValueError, TypeError):
+            continue
+            
+    history = []
+    sorted_dates = sorted(daily_data.keys(), key=lambda x: datetime.strptime(x, "%b %d"))[-7:]
+    for date in sorted_dates:
+        vals = daily_data[date]
+        avg_t = sum(vals["temps"]) / len(vals["temps"]) if vals["temps"] else 0
+        avg_h = sum(vals["hums"]) / len(vals["hums"]) if vals["hums"] else 0
+        avg_s = sum(vals["soils"]) / len(vals["soils"]) if vals["soils"] else 0
+        
+        history.append({
+            "date": date,
+            "temp": round(avg_t, 1),
+            "hum": round(avg_h, 1),
+            "soil": round(avg_s, 1)
+        })
+        
+    return jsonify({"status": "success", "history": history})

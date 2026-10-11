@@ -3,54 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SmartGrow | ESP32 Plant Monitor</title>
-<!-- Linked to the external modular CSS -->
-<link rel="stylesheet" href="/css/main.css?v=7">
+<title>SmartGrow | Ambient Glass Dashboard</title>
+<!-- Version 21 Cache Break -->
+<link rel="stylesheet" href="/css/main.css?v=21">
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#030a07">
+<meta name="theme-color" content="#050a07">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SmartGrow">
 
-<!-- Modern Font -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
- 
-<!-- Professional Vector Icons -->
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
-
-<!-- BULLETPROOF MOBILE LAYOUT OVERRIDE -->
-<style>
-    /* Desktop Default Grid for Bottom Sections */
-    .custom-grid { 
-        display: grid; 
-        grid-template-columns: 1fr 1fr; 
-        gap: 20px; 
-        margin-top: 20px; 
-    }
-
-    @media (max-width: 768px) {
-        /* 1. FIX THE OVERLAP ("Nakadikit") BUG */
-        .topbar { margin-bottom: 40px !important; }
-        
-        /* 2. Force 1-column grids on mobile */
-        .custom-grid { grid-template-columns: 1fr; }
-        
-        /* 3. Safely manage tab visibility without triggering layout collapse */
-        #tab-sensors, #tab-auto, #tab-health, #tab-export { display: none; }
-        
-        body.view-sensors #tab-sensors { display: block !important; }
-        body.view-auto #tab-auto { display: block !important; }
-        body.view-health #tab-health { display: block !important; }
-        body.view-export #tab-export { display: block !important; }
-        
-        /* Guarantee grid rendering inside active tabs */
-        body.view-sensors #tab-sensors .sensor-grid { display: grid !important; }
-        body.view-auto #tab-auto .automation-grid { display: grid !important; }
-    }
-</style>
 </head>
 <body>
 
@@ -62,264 +27,343 @@
     <span id="backendBannerText">Backend unreachable — retrying...</span>
 </div>
 
+<!-- HEADER -->
 <div class="topbar">
-    <div class="page-title">
-        <h2>
-            <i class="ph-fill ph-plant"></i>
-            <span class="title-mobile">SmartGrow</span>
-        </h2>
+    <div class="brand">
+        <div class="brand-mark"><i class="ph-fill ph-plant"></i></div>
+        <div class="page-title">
+            <h2>Brassica Monitoring</h2>
+            <p>Live environment monitoring</p>
+        </div>
     </div>
 
-    <div class="top-actions">
-        <div class="connection" id="espBadge">
-            <div class="dot" id="espDot"></div> 
-            <span id="espText">WAITING FOR ESP32...</span>
+    <div class="header-right">
+        <div class="header-badge esp-status" id="espBadge">
+            <div class="dot" id="espDot"></div>
+            <span id="espText">CONNECTING...</span>
         </div>
-        <div class="date" id="currentDate">Loading...</div>
+        <div class="header-badge date-status" id="currentDate">Loading...</div>
         <button class="control-btn" id="installBtn" onclick="handleInstallClick()">
-            <i class="ph-bold ph-download-simple"></i> Install App
+            <i class="ph-bold ph-download-simple"></i> Install
         </button>
     </div>
 </div>
 
-<!-- ==========================================
-     TAB 1: SENSORS
-=========================================== -->
-<div id="tab-sensors">
-    <div class="section-header" id="nav-env">
-        <h3>Environmental Overview</h3>
-    </div>
+<div class="dashboard-layout">
 
-    <div class="sensor-grid">
-        <div class="sensor temperature">
-            <div class="sensor-top">
-                <div class="sensor-icon"><i class="ph-fill ph-thermometer"></i></div>
-                <div class="sensor-status" id="temperatureStatus">NORMAL</div>
-            </div>
-            <div class="sensor-name">TEMPERATURE (Fan triggers at &ge;30&deg;C)</div>
-            <div class="sensor-value"><span id="temperature">--</span><span class="sensor-unit">&deg;C</span></div>
-            <div class="sensor-description">DHT11 Ambient sensor</div>
-        </div>
+    <!-- LEFT COLUMN: SENSORS -->
+    <div class="dashboard-column">
 
-        <div class="sensor humidity">
-            <div class="sensor-top">
-                <div class="sensor-icon"><i class="ph-fill ph-drop"></i></div>
-                <div class="sensor-status" id="humidityStatus">NORMAL</div>
-            </div>
-            <div class="sensor-name">AIR HUMIDITY</div>
-            <div class="sensor-value"><span id="humidity">--</span><span class="sensor-unit">%</span></div>
-            <div class="sensor-description">Target: 60% - 80% RH</div>
-        </div>
+        <div id="tab-sensors">
 
-        <div class="sensor soil">
-            <div class="sensor-top">
-                <div class="sensor-icon"><i class="ph-fill ph-potted-plant"></i></div>
-                <div class="sensor-status" id="soilStatus">GOOD</div>
-            </div>
-            <div class="sensor-name">SOIL MOISTURE (Pump triggers at &le;40%)</div>
-            <div class="sensor-value"><span id="soil">--</span><span class="sensor-unit">%</span></div>
-            <div class="sensor-description">Soil probe sensor</div>
-        </div>
-
-        <div class="sensor light">
-            <div class="sensor-top">
-                <div class="sensor-icon"><i class="ph-fill ph-sun"></i></div>
-                <div class="sensor-status" id="lightStatus">OPTIMAL</div>
-            </div>
-            <div class="sensor-name">LIGHT INTENSITY (Grow light assists below 300)</div>
-            <div class="sensor-value"><span id="light">--</span><span class="sensor-unit">/1000</span></div>
-            <div class="sensor-description">LDR sensor, calibrated 0 (dark) - 1000 (bright)</div>
-        </div>
-    </div>
-</div>
-
-<!-- ==========================================
-     TAB 2: AUTO
-=========================================== -->
-<div id="tab-auto">
-    <div class="section-header" id="nav-auto" style="margin-top: 40px;">
-        <div>
-            <h3>Smart Automation</h3>
-            <span style="color: var(--text-muted); font-size: 12px;">ESP32 autonomous system responses</span>
-        </div>
-    </div>
-
-    <div class="automation-grid">
-        <!-- Auto-Watering Card -->
-        <div class="automation-card" id="autoWateringCard">
-            <div class="automation-icon"><i class="ph-fill ph-drop"></i></div>
-            <div class="automation-info">
-                <h4 id="pumpTitle">Auto-Watering: Standby</h4>
-                <p id="pumpDesc">Soil moisture is optimal.</p>
-            </div>
-            <div class="card-controls">
-                <div class="auto-badge-static">
-                    <i class="ph-bold ph-arrows-clockwise"></i>
-                    <span>AUTO</span>
+            <!-- Hero: live readings -->
+            <div class="panel panel-hero">
+                <div class="hero-head">
+                    <h3>Environment overview</h3>
+                    <span class="hero-key">Ideal range</span>
                 </div>
-            </div>
-        </div>
 
-        <!-- Grow Light Card -->
-        <div class="automation-card" id="autoLightCard">
-            <div class="automation-icon"><i class="ph-fill ph-lightbulb"></i></div>
-            <div class="automation-info">
-                <h4 id="lightTitle">Grow Light: Standby</h4>
-                <p id="lightDesc">Natural light is sufficient.</p>
-            </div>
-            <div class="card-controls">
-                <div class="auto-badge-static">
-                    <i class="ph-bold ph-arrows-clockwise"></i>
-                    <span>AUTO</span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Exhaust Fan Card -->
-        <div class="automation-card" id="autoFanCard">
-            <div class="automation-icon"><i class="ph-fill ph-fan"></i></div>
-            <div class="automation-info">
-                <h4 id="fanTitle">Exhaust Fan: Standby</h4>
-                <p id="fanDesc">Temperature is optimal.</p>
-            </div>
-            <div class="card-controls">
-                <div class="auto-badge-static">
-                    <i class="ph-bold ph-arrows-clockwise"></i>
-                    <span>AUTO</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ==========================================
-     TAB 3: HEALTH
-=========================================== -->
-<div id="tab-health">
-    <div class="section-header" id="nav-health" style="margin-top: 40px;">
-        <div>
-            <h3>Plant Health</h3>
-            <span style="color: var(--text-muted); font-size: 12px;">Current condition</span>
-        </div>
-    </div>
-
-    <div class="custom-grid">
-        <!-- Overall Health Card -->
-        <div class="automation-card" style="align-items: center; justify-content: flex-start; gap: 24px; padding: 30px; border-radius: 24px;">
-            <div class="plant"><i class="ph-fill ph-plant"></i></div>
-            <div style="flex-grow: 1;">
-                <div class="health-score" id="healthScore">--%</div>
-                <div class="health-text">OVERALL SCORE</div>
-                <div class="progress"><div class="progress-bar" id="healthProgress" style="width:0%"></div></div>
-            </div>
-        </div>
-
-        <!-- 2x2 Metrics Grid (Spaced consistently like Auto tab) -->
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
-            <div class="automation-card" style="flex-direction: column; align-items: flex-start; justify-content: center; padding: 20px; gap: 6px;">
-                <div class="metric-name" style="color: var(--text-muted); font-size: 10px; letter-spacing: 1px; font-weight: 600;">TEMPERATURE</div>
-                <div class="metric-value good" id="tempHealth" style="font-size: 16px; font-weight: 500;">Optimal</div>
-            </div>
-            <div class="automation-card" style="flex-direction: column; align-items: flex-start; justify-content: center; padding: 20px; gap: 6px;">
-                <div class="metric-name" style="color: var(--text-muted); font-size: 10px; letter-spacing: 1px; font-weight: 600;">HUMIDITY</div>
-                <div class="metric-value good" id="humidityHealth" style="font-size: 16px; font-weight: 500;">Optimal</div>
-            </div>
-            <div class="automation-card" style="flex-direction: column; align-items: flex-start; justify-content: center; padding: 20px; gap: 6px;">
-                <div class="metric-name" style="color: var(--text-muted); font-size: 10px; letter-spacing: 1px; font-weight: 600;">SOIL</div>
-                <div class="metric-value good" id="soilHealth" style="font-size: 16px; font-weight: 500;">Moist</div>
-            </div>
-            <div class="automation-card" style="flex-direction: column; align-items: flex-start; justify-content: center; padding: 20px; gap: 6px;">
-                <div class="metric-name" style="color: var(--text-muted); font-size: 10px; letter-spacing: 1px; font-weight: 600;">LIGHT</div>
-                <div class="metric-value good" id="lightHealth" style="font-size: 16px; font-weight: 500;">Good</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ==========================================
-     TAB 4: EXPORT
-=========================================== -->
-<div id="tab-export">
-    <div class="custom-grid" style="margin-top: 40px;">
-        <!-- System Log Panel -->
-        <div class="panel">
-            <div class="panel-title">
-                <h3>System Log</h3>
-                <span>Today</span>
-            </div>
-            <div class="activity" id="activityFeed"></div>
-        </div>
-
-        <!-- Single Live Data Export Panel -->
-        <div class="panel">
-            <div class="panel-title">
-                <div>
-                    <h3>Data Export</h3>
-                    <span>Download complete ESP32 history</span>
-                </div>
-                <span class="live-badge" style="background: rgba(0, 255, 136, 0.1); color: var(--primary);">READY</span>
-            </div>
-            
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 180px; text-align: center; gap: 15px;">
-                <i class="ph-fill ph-hard-drives" style="font-size: 56px; color: var(--primary); text-shadow: 0 0 20px var(--primary-glow);"></i>
-                
-                <div>
-                    <h4 style="font-size: 16px; margin-bottom: 16px; font-weight: 500;">Complete Sensor Log</h4>
-                    
-                    <!-- Button Container -->
-                    <!-- Plain <a href> downloads were replaced with JS-driven
-                         fetches (downloadFile(), in public/js/utils.js) so a
-                         missing/empty history shows a toast in the System Log
-                         panel instead of a bare, unstyled 404 page. -->
-                    <div style="display: flex; gap: 12px; justify-content: center;">
-                        <button type="button" style="background: transparent; border: 1px solid var(--primary); color: var(--primary); padding: 8px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 1px;" onclick="downloadFile('/sensor_data.csv', 'SmartGrow_Complete_Data.csv')">
-                            <i class="ph-bold ph-file-csv" style="font-size: 14px;"></i> CSV
-                        </button>
-                        <button type="button" class="export-btn btn-excel" onclick="downloadFile('/download/excel', 'SmartGrow_Data.xlsx')">
-                            <i class="ph-bold ph-file-xls"></i> EXCEL
-                        </button>
+                <div class="readings">
+                    <div class="reading is-temp">
+                        <div class="reading-top"><span class="reading-chip"><i class="ph-fill ph-thermometer"></i></span><span class="reading-label">Temperature</span><span class="reading-state">No data</span></div>
+                        <div class="reading-val"><span id="temperature">--</span><small>&deg;C</small></div>
+                        <div class="meter" data-source="temperature" data-min="0" data-max="45" data-ideal-min="15" data-ideal-max="28"><i class="meter-ideal"></i><b class="meter-pin"></b></div>
+                    </div>
+                    <div class="reading is-hum">
+                        <div class="reading-top"><span class="reading-chip"><i class="ph-fill ph-drop"></i></span><span class="reading-label">Humidity</span><span class="reading-state">No data</span></div>
+                        <div class="reading-val"><span id="humidity">--</span><small>%</small></div>
+                        <div class="meter" data-source="humidity" data-min="0" data-max="100" data-ideal-min="55" data-ideal-max="80"><i class="meter-ideal"></i><b class="meter-pin"></b></div>
+                    </div>
+                    <div class="reading is-soil">
+                        <div class="reading-top"><span class="reading-chip"><i class="ph-fill ph-potted-plant"></i></span><span class="reading-label">Soil moisture</span><span class="reading-state">No data</span></div>
+                        <div class="reading-val"><span id="soil">--</span><small>%</small></div>
+                        <div class="meter" data-source="soil" data-min="0" data-max="100" data-ideal-min="40" data-ideal-max="70"><i class="meter-ideal"></i><b class="meter-pin"></b></div>
+                    </div>
+                    <div class="reading is-light">
+                        <div class="reading-top"><span class="reading-chip"><i class="ph-fill ph-sun"></i></span><span class="reading-label">Light level</span><span class="reading-state">No data</span></div>
+                        <div class="reading-val"><span id="light">--</span><small>Lux</small></div>
+                        <div class="meter" data-source="light" data-min="0" data-max="1000" data-ideal-min="300" data-ideal-max="800"><i class="meter-ideal"></i><b class="meter-pin"></b></div>
                     </div>
                 </div>
             </div>
+
+            <!-- Smart insights -->
+            <div class="panel panel-insights">
+                <div class="section-header">
+                    <h3>Smart insights</h3>
+                </div>
+                <div class="insights-list">
+                    <div class="insight-card danger" id="insightTemp">
+                        <div class="insight-icon"><i class="ph-fill ph-warning-circle"></i></div>
+                        <div class="insight-info">
+                            <h4>High Temperature</h4>
+                            <p>Ambient heat has risen above optimal levels. Exhaust fan is currently active.</p>
+                        </div>
+                    </div>
+                    <div class="insight-card warning" id="insightSoil">
+                        <div class="insight-icon"><i class="ph-fill ph-drop"></i></div>
+                        <div class="insight-info">
+                            <h4>Irrigation Recommended</h4>
+                            <p>Soil moisture levels have dropped below 40%.</p>
+                        </div>
+                    </div>
+                    <div class="insight-card success">
+                        <div class="insight-icon"><i class="ph-fill ph-check-circle"></i></div>
+                        <div class="insight-info">
+                            <h4>System Stable</h4>
+                            <p>All other environmental variables are within normal bounds.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent (slim strip) WITH ADDED BUTTON -->
+            <div class="panel panel-strip" style="align-items: center;">
+                <h3 class="strip-title">Recent</h3>
+                <div class="history-list">
+                    <div class="history-item">
+                        <span class="history-date">Yesterday</span>
+                        <div class="history-stats">
+                            <span class="t"><i class="ph-fill ph-thermometer"></i> 31.2&deg;C</span>
+                            <span class="h"><i class="ph-fill ph-drop"></i> 72%</span>
+                            <span class="s"><i class="ph-fill ph-potted-plant"></i> 45%</span>
+                        </div>
+                    </div>
+                </div>
+                <button class="control-btn" style="flex: none; padding: 10px 14px;" onclick="openHistoryModal()">
+                    <i class="ph-bold ph-arrow-right" style="margin-left: 4px;"></i>
+                </button>
+            </div>
+
         </div>
+    </div>
+
+    <!-- RIGHT COLUMN: RELAYS & EXPORT -->
+    <div class="dashboard-column">
+
+        <div id="tab-auto">
+            <div class="panel panel-climate">
+                <div class="climate-box">
+                    <div class="climate-icon"><i class="ph-fill ph-plant"></i></div>
+                    <div class="climate-text">
+                        <strong>Climate System Active</strong>
+                        System regulates metrics dynamically.
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel panel-vigor">
+                <div class="section-header">
+                    <h3>Plant health</h3>
+                </div>
+                <div class="vigor-card">
+                    <!-- Dynamic Progress Ring container -->
+                    <div class="vigor-ring" id="vigorRingContainer" style="--pct: 98;">
+                        <span class="ring-arc" id="vigorRingArc"></span>
+                        <strong id="healthScore">98%</strong>
+                    </div>
+                    <div class="vigor-lead">
+                        <h4>Brassica Vigor</h4>
+                        <p id="healthDesc">Leaf biometric index is optimal</p>
+                        <span id="healthStatusBadge" style="display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: var(--r-pill); font-size: 12px; font-weight: 600; color: var(--mint); background: var(--primary-soft);">Optimal</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Automation -->
+            <div class="panel panel-auto">
+                <div class="section-header">
+                    <h3>Automation</h3>
+                </div>
+                <div class="automation-list">
+
+                    <div class="auto-card-modern" id="autoWateringCard">
+                        <div class="auto-lead">
+                            <div class="auto-icon"><i class="ph-fill ph-drop"></i></div>
+                            <div class="toggle-info">
+                                <h4 id="pumpTitle">Auto-Watering</h4>
+                                <p id="pumpDesc">Soil is hydrated</p>
+                            </div>
+                        </div>
+                        <div class="toggle-group">
+                            <span class="auto-status-pill" id="pumpPill">Standby</span>
+                        </div>
+                    </div>
+
+                    <div class="auto-card-modern" id="autoLightCard">
+                        <div class="auto-lead">
+                            <div class="auto-icon"><i class="ph-fill ph-lightbulb"></i></div>
+                            <div class="toggle-info">
+                                <h4 id="lightTitle">Grow Light</h4>
+                                <p id="lightDesc">Supplementing sunlight</p>
+                            </div>
+                        </div>
+                        <div class="toggle-group">
+                            <span class="auto-status-pill" id="lightPill">Standby</span>
+                        </div>
+                    </div>
+
+                    <div class="auto-card-modern" id="autoFanCard">
+                        <div class="auto-lead">
+                            <div class="auto-icon"><i class="ph-fill ph-fan"></i></div>
+                            <div class="toggle-info">
+                                <h4 id="fanTitle">Exhaust Fan</h4>
+                                <p id="fanDesc">Optimal temperature</p>
+                            </div>
+                        </div>
+                        <div class="toggle-group">
+                            <span class="auto-status-pill" id="fanPill">Standby</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Data export -->
+        <div id="tab-export">
+            <button class="control-btn export-btn" onclick="downloadFile('/download/excel', 'SmartGrow_Data.xlsx')">
+                <i class="ph-bold ph-file-xls"></i> Download full Excel report
+            </button>
+        </div>
+
     </div>
 </div>
 
-<footer>
-    <span>SMARTGROW • ESP32 • WI-FI • SMART AGRICULTURE</span>
-    <span id="footerStatus">System online • Last update just now</span>
-</footer>
-
 </main>
 
-<!-- BOTTOM NAVIGATION BAR (Mobile Only) - Adjusted for 4 tabs -->
+<!-- BOTTOM NAVIGATION BAR (Mobile) -->
 <nav class="bottom-nav">
-    <a href="#tab-sensors" class="nav-item active" style="width: 25%;" onclick="switchTab('sensors', this, event)">
+    <a href="#tab-sensors" class="nav-item active" onclick="switchTab('sensors', this, event)">
         <i class="ph-fill ph-thermometer"></i>
         <span>Sensors</span>
     </a>
-    <a href="#tab-auto" class="nav-item" style="width: 25%;" onclick="switchTab('auto', this, event)">
+    <a href="#tab-auto" class="nav-item" onclick="switchTab('auto', this, event)">
         <i class="ph-fill ph-cpu"></i>
         <span>Auto</span>
     </a>
-    <a href="#tab-health" class="nav-item" style="width: 25%;" onclick="switchTab('health', this, event)">
-        <i class="ph-fill ph-plant"></i>
-        <span>Health</span>
-    </a>
-    <a href="#tab-export" class="nav-item" style="width: 25%;" onclick="switchTab('export', this, event)">
+    <a href="#tab-export" class="nav-item" onclick="switchTab('export', this, event)">
         <i class="ph-fill ph-hard-drives"></i>
         <span>Export</span>
     </a>
 </nav>
 
-</div>      
+</div>
+
+<!-- 7-DAY AVERAGES MODAL -->
+<div id="historyModal" class="modal" style="display:none;">
+    <div class="modal-card" style="max-width: 480px; text-align: left; padding: 24px;">
+        
+        <!-- Modal Header -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+            <div>
+                <h4 style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 18px;">
+                    <i class="ph-fill ph-calendar-blank" style="color: var(--primary);"></i> 7-Day Averages
+                </h4>
+                <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Daily environmental metric summary</p>
+            </div>
+            <button class="control-btn" style="width: 28px; height: 28px; padding: 0; display: flex; justify-content: center; align-items: center; border-radius: 50%; background: rgba(255,255,255,0.1); border: none;" onclick="closeHistoryModal()">                <i class="ph-bold ph-x" style="font-size: 14px;"></i>
+            </button>
+        </div>
+        
+        <!-- Table Column Headers -->
+        <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; padding: 0 16px 12px; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px;">
+            <span>Date</span>
+            <span style="text-align: center;">Temp</span>
+            <span style="text-align: center;">Humidity</span>
+            <span style="text-align: right;">Soil</span>
+        </div>
+
+        <!-- Scrollable Vertical History List -->
+        <div id="modalHistoryList" style="display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; padding-right: 4px;">
+            
+            <!-- Row 1 -->
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Oct 10</span>
+                    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Thursday</span>
+                </div>
+                <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">30.5&deg;</div>
+                <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">75%</div>
+                <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">50%</div>
+            </div>
+
+            <!-- Row 2 -->
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Oct 09</span>
+                    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Wednesday</span>
+                </div>
+                <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">31.0&deg;</div>
+                <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">72%</div>
+                <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">46%</div>
+            </div>
+
+            <!-- Row 3 -->
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Oct 08</span>
+                    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Tuesday</span>
+                </div>
+                <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">29.8&deg;</div>
+                <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">78%</div>
+                <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">52%</div>
+            </div>
+
+            <!-- Row 4 -->
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Oct 07</span>
+                    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Monday</span>
+                </div>
+                <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">29.5&deg;</div>
+                <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">80%</div>
+                <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">55%</div>
+            </div>
+
+            <!-- Row 5 -->
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Oct 06</span>
+                    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Sunday</span>
+                </div>
+                <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">28.9&deg;</div>
+                <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">82%</div>
+                <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">58%</div>
+            </div>
+
+            <!-- Row 6 -->
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Oct 05</span>
+                    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Saturday</span>
+                </div>
+                <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">30.1&deg;</div>
+                <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">74%</div>
+                <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">49%</div>
+            </div>
+
+            <!-- Row 7 -->
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">Oct 04</span>
+                    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Friday</span>
+                </div>
+                <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">31.2&deg;</div>
+                <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">70%</div>
+                <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">42%</div>
+            </div>
+            
+        </div>
+    </div>
+</div>
 
 <!-- iOS "Add to Home Screen" instructions modal -->
-<div id="iosInstallModal" style="display:none; position:fixed; inset:0; z-index:999; background:rgba(3,10,7,0.85); align-items:center; justify-content:center; padding:20px;">
-    <div style="background: var(--panel-bg, #0a1810); border: 1px solid var(--border, #1f3a2a); border-radius: 16px; max-width: 340px; width:100%; padding: 24px; text-align:center; color: var(--text-main, #e8fff2);">
-        <i class="ph-fill ph-plant" style="font-size:40px; color: var(--primary); text-shadow:0 0 20px var(--primary-glow);"></i>
-        <h4 style="margin: 12px 0 8px; font-size: 16px;">Install SmartGrow</h4>
-        <p style="font-size: 13px; color: var(--text-muted); line-height:1.6; margin-bottom: 18px;">
+<div id="iosInstallModal" class="modal" style="display:none;">
+    <div class="modal-card">
+        <i class="ph-fill ph-plant"></i>
+        <h4>Install SmartGrow</h4>
+        <p>
             Tap the <i class="ph-bold ph-export"></i> Share icon in Safari's toolbar, then choose
             <strong>"Add to Home Screen"</strong> to install this dashboard.
         </p>
@@ -327,26 +371,65 @@
     </div>
 </div>
 
-<!-- Linked to the new ES6 module entry point -->
+<!-- Modal Control Scripts -->
+<script>
+    function openHistoryModal() {
+        document.getElementById('historyModal').style.display = 'flex';
+    }
+    function closeHistoryModal() {
+        document.getElementById('historyModal').style.display = 'none';
+    }
+</script>
+
+<!-- Range bars + status words. Tune data-min / data-max / data-ideal-min / data-ideal-max on each .meter -->
+<script>
+(function () {
+    document.querySelectorAll('.meter').forEach(function (m) {
+        var src = document.getElementById(m.dataset.source);
+        if (!src) return;
+        var min = parseFloat(m.dataset.min), max = parseFloat(m.dataset.max);
+        var imin = parseFloat(m.dataset.idealMin), imax = parseFloat(m.dataset.idealMax);
+        var reading = m.closest('.reading');
+        var stateEl = reading && reading.querySelector('.reading-state');
+        function pct(x) { return Math.max(0, Math.min(100, (x - min) / (max - min) * 100)); }
+        m.style.setProperty('--imin', pct(imin).toFixed(1));
+        m.style.setProperty('--imax', pct(imax).toFixed(1));
+        function update() {
+            var v = parseFloat(src.textContent);
+            if (isNaN(v)) {
+                m.style.setProperty('--pct', 0);
+                if (reading) reading.removeAttribute('data-state');
+                if (stateEl) stateEl.textContent = 'No data';
+                return;
+            }
+            m.style.setProperty('--pct', pct(v).toFixed(1));
+            var s = v < imin ? 'low' : v > imax ? 'high' : 'ok';
+            if (reading) reading.setAttribute('data-state', s);
+            if (stateEl) stateEl.textContent = s === 'ok' ? 'In range' : s === 'low' ? 'Low' : 'High';
+        }
+        update();
+        new MutationObserver(update).observe(src, { childList: true, characterData: true, subtree: true });
+    });
+})();
+</script>
+
+<!-- Linked to module EntryPoint -->
 <script type="module" src="/js/main.js"></script>
 
 {% if dev_mode %}
-<!-- DEV MODE: live-reload client. Listens to dashboard.py's /dev/reload-stream SSE endpoint. -->
+<!-- DEV MODE: live-reload SSE stream client. -->
 <script>
 (function () {
     function connect() {
         const es = new EventSource('/dev/reload-stream');
         let hasConnected = false;
-
         es.onopen = () => { hasConnected = true; };
-
         es.onmessage = (e) => {
             if (e.data === 'reload') {
                 console.log('[DevReload] Frontend change detected — reloading...');
                 location.reload();
             }
         };
-
         es.onerror = () => {
             es.close();
             if (hasConnected) {

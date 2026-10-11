@@ -22,6 +22,8 @@ import sys
 import threading
 import time
 from datetime import datetime
+from flask import jsonify
+import pandas as pd
 
 # Local desktop mode keeps the old "dev mode always on" experience by
 # default. Set SMARTGROW_DEV_MODE=false in your environment before running
@@ -31,7 +33,7 @@ os.environ.setdefault("SMARTGROW_DEV_MODE", "true")
 
 import webview  # not in requirements.txt on purpose — see requirements-desktop.txt
 
-from app import app, DEV_MODE, broadcast_reload, BASE_DIR
+from app import _resolve_history_rows, app, DEV_MODE, broadcast_reload, BASE_DIR
 
 # ============================================================
 # DEV MODE — live reload (no manual refresh, no manual re-run)
@@ -198,6 +200,7 @@ def run_flask_https():
     else:
         print("[SmartGrow] cert.pem/key.pem not found next to desktop.py — HTTPS server not started.")
         print("[SmartGrow] The automatic install prompt will NOT appear on phones until this is set up.")
+
 
 
 if __name__ == "__main__":

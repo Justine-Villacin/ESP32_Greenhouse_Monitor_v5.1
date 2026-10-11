@@ -82,6 +82,55 @@ function fetchESP32Data() {
         });
 }
 
+async function loadHistoricalData() {
+    try {
+        const response = await fetch('/api/history');
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.history.length > 0) {
+            // 1. Populate the Recent strip on the dashboard (taking the last 2 days)
+            const recentList = document.querySelector('.panel-strip .history-list');
+            if (recentList) {
+                recentList.innerHTML = '';
+                const recentItems = data.history.slice(-2).reverse();
+                recentItems.forEach(day => {
+                    recentList.innerHTML += `
+                        <div class="history-item">
+                            <span class="history-date">${day.date}</span>
+                            <div class="history-stats">
+                                <span class="t"><i class="ph-fill ph-thermometer"></i> ${day.temp}&deg;C</span>
+                                <span class="h"><i class="ph-fill ph-drop"></i> ${day.hum}%</span>
+                                <span class="s"><i class="ph-fill ph-potted-plant"></i> ${day.soil}%</span>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            // 2. Populate the 7-Day Modal Table using the new ID
+            const modalList = document.getElementById('modalHistoryList');
+            if (modalList) {
+                modalList.innerHTML = '';
+                data.history.slice().reverse().forEach(day => {
+                    modalList.innerHTML += `
+                        <div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; align-items: center; padding: 12px 16px; background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px;">
+                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                <span style="font-size: 13px; font-weight: 600; color: var(--text-main);">${day.date}</span>
+                            </div>
+                            <div style="text-align: center; color: var(--c-temp); font-size: 13px; font-weight: 700;">${day.temp}&deg;</div>
+                            <div style="text-align: center; color: var(--c-hum); font-size: 13px; font-weight: 700;">${day.hum}%</div>
+                            <div style="text-align: right; color: var(--c-soil); font-size: 13px; font-weight: 700;">${day.soil}%</div>
+                        </div>
+                    `;
+                });
+            }
+        }
+    } catch (err) {
+        console.error("Could not load historical averages:", err);
+    }
+}
+
+loadHistoricalData();
 // Initial fetch and start polling every 2 seconds
 fetchESP32Data();
 setInterval(fetchESP32Data, 2000);

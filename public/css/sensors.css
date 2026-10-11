@@ -1,28 +1,23 @@
-.sensor-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-.sensor { background: var(--surface); border: 1px solid var(--border); border-radius: 24px; padding: 24px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative; overflow: hidden; }
-.sensor::after { content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 2px; }
-.temperature::after { background: var(--danger); }
-.humidity::after { background: var(--info); }
-.soil::after { background: var(--primary); }
-.light::after { background: var(--warning); }
-.sensor:hover { transform: translateY(-5px); background: var(--surface-hover); border-color: var(--border-light); box-shadow: 0 15px 35px rgba(0,0,0,0.3); }
+.map-visual-container { display: flex; flex-direction: column; align-items: center; }
+.map-grid-mesh { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; background: radial-gradient(circle at 50% 50%, rgba(0, 255, 136, 0.04), transparent 70%); border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.02); padding: 16px; position: relative; }
+.map-zone { background: rgba(14, 30, 22, 0.5); border: 1.5px solid rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 6px; text-align: center; transition: all 0.3s ease; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
+.map-zone .zone-lbl { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+.map-zone .zone-val { font-size: 15px; font-weight: 600; color: var(--text-main); }
+.map-zone .zone-status { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 
-.sensor-top { display: flex; justify-content: space-between; align-items: flex-start; }
-.sensor-icon { width: 48px; height: 48px; display: flex; justify-content: center; align-items: center; border-radius: 14px; font-size: 24px; }
-.temperature .sensor-icon { background: var(--danger-glow); color: var(--danger); }
-.humidity .sensor-icon { background: var(--info-glow); color: var(--info); }
-.soil .sensor-icon { background: var(--primary-glow); color: var(--primary); }
-.light .sensor-icon { background: var(--warning-glow); color: var(--warning); }
+/* Zone Status Types */
+.map-zone.healthy { border-color: rgba(0, 255, 136, 0.2); background: linear-gradient(180deg, rgba(14, 30, 22, 0.5), rgba(0, 255, 136, 0.03)); }
+.map-zone.healthy .zone-status { color: var(--primary); }
+.map-zone.warning { border-color: rgba(255, 189, 46, 0.2); background: linear-gradient(180deg, rgba(14, 30, 22, 0.5), rgba(255, 189, 46, 0.03)); }
+.map-zone.warning .zone-status { color: var(--warning); }
+.map-zone.risk { border-color: rgba(255, 69, 106, 0.2); background: linear-gradient(180deg, rgba(14, 30, 22, 0.5), rgba(255, 69, 106, 0.03)); }
+.map-zone.risk .zone-status { color: var(--danger); }
+.map-zone.offline-zone { border-style: dashed; border-color: rgba(255, 255, 255, 0.05); opacity: 0.55; }
+.map-zone.offline-zone .zone-status { color: var(--text-muted); }
 
-.sensor-status { font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 50px; background: rgba(255,255,255,0.05); }
-.sensor-name { color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: 1px; margin-top: 30px; }
-.sensor-value { font-size: 42px; font-weight: 700; margin-top: 5px; letter-spacing: -1px; }
-.sensor-unit { color: var(--text-muted); font-size: 16px; font-weight: 400; margin-left: 2px; }
-.sensor-description { color: var(--text-muted); font-size: 12px; margin-top: 10px; font-weight: 300; }
-
-/* Disconnected-sensor state — a whole-card treatment, not just the small
-   status chip, so a disconnected sensor is obvious at a glance. */
-.sensor.offline { border-style: dashed; border-color: var(--danger); opacity: 0.6; }
-.sensor.offline::after { background: var(--danger); }
-.sensor.offline .sensor-icon { filter: grayscale(1); opacity: 0.6; }
-.sensor.offline .sensor-value { color: var(--text-muted); }
+.map-legend { display: flex; justify-content: center; gap: 16px; margin-top: 14px; font-size: 10px; font-weight: 500; color: var(--text-muted); }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot { width: 6px; height: 6px; border-radius: 50%; }
+.legend-dot.healthy { background: var(--primary); box-shadow: 0 0 6px var(--primary); }
+.legend-dot.warning { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+.legend-dot.risk { background: var(--danger); box-shadow: 0 0 6px var(--danger); }

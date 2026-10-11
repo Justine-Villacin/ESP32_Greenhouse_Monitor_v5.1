@@ -1,20 +1,43 @@
 :root {
-    --bg-base: #030a07;
-    --surface: #0a1410;
-    --surface-hover: #101f19;
+    /* Brand */
+    --primary: #10b981;
+    --primary-glow: rgba(16, 185, 129, 0.45);
+    --primary-soft: rgba(16, 185, 129, 0.14);
+    --mint: #6ee7b7;
 
-    --border: rgba(255, 255, 255, 0.08);
-    --border-light: rgba(255, 255, 255, 0.15);
+    /* Status */
+    --warning: #ffbd2e;
+    --danger: #ff6b81;
 
-    --primary: #00ff88;
-    --primary-glow: rgba(0, 255, 136, 0.3);
-    --info: #00e1ff;
-    --info-glow: rgba(0, 225, 255, 0.3);
-    --warning: #ffd000;
-    --warning-glow: rgba(255, 208, 0, 0.3);
-    --danger: #ff3b6b;
-    --danger-glow: rgba(255, 59, 107, 0.3);
+    /* Glass: low alpha so the photo and glows show through the blur */
+    --glass-bg: rgba(8, 20, 14, 0.38);
+    --glass-card: rgba(255, 255, 255, 0.045);
+    --glass-card-hover: rgba(255, 255, 255, 0.075);
 
-    --text-main: #e2f0e9;
-    --text-muted: #829a8f;
+    /* Borders */
+    --border: rgba(255, 255, 255, 0.13);
+    --border-light: rgba(255, 255, 255, 0.3);
+    --border-soft: rgba(255, 255, 255, 0.08);
+
+    /* Text */
+    --text-main: #ffffff;
+    --text-muted: rgba(255, 255, 255, 0.64);
+
+    /* Sensor colors */
+    --c-temp: #ff8a65;
+    --c-hum: #4fc3f7;
+    --c-soil: #81c784;
+    --c-light: #ffd54f;
+
+    /* Shape + motion */
+    --r-panel: 28px;
+    --r-card: 18px;
+    --r-pill: 999px;
+    --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Fluid spacing: everything scales with viewport height so the page always fits one screen */
+:root {
+    --pad: clamp(14px, 2.2vh, 26px);
+    --gap: clamp(10px, 1.8vh, 22px);
 }
